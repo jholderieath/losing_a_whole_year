@@ -1,0 +1,4 @@
+"0","model_table %>%"
+"0","  filter(term %in% list('Online1', 'Honors1', 'Upper1','Grad0','term_label_SPRING.20','term_label_SUMMER.20','term_label_FALL.20','term_label_WINTER.20.21')) %>%"
+"0","  kbl()%>%"
+"0","  kable_minimal()"

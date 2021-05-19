@@ -1,0 +1,507 @@
+---
+title: "Impact of COVID-19 Related Transition to Online Instruction on Student Achievement"
+author: "Jason J. Holderieath, Michael K. Crosby, T. Eric McConnell, D. Paul Jackson"
+date: "2/16/2021"
+journal: "Applied Economics Teaching Resources"
+abstract: |
+    Distance education and online delivery of course materials are not new in the United States. However, the sudden mass movement of entire universities online is new. The COVID-19 pandemic forced many universities to move their instruction online, over a weekend in some cases. This article explores the effects on student achievement by estimating a Poisson model of course grade outcomes to find that the Spring 2020 term was not statistically significant in its effects on students completing the course, passing the course, and earning an A in the course. Graphically analyzed, the data show a possibility of different types of effects for different students, courses, and professors. Further research with more data is needed to understand the effect entirely.
+    
+layout:  3p
+output:
+  html_document: default
+header-includes: \usepackage{dcolumn}
+---
+
+```{r setup}
+
+knitr::opts_chunk$set(echo = TRUE)
+options(tinytex.verbose = TRUE)
+library(readxl)
+library("scales")
+library("stringr")
+library("ggthemes") 
+library(cowplot)
+library(knitr)
+library(kableExtra)
+require(nnet)
+library(stargazer)
+library(lmtest)
+library(sandwich)
+library(tidyverse)
+library(ggeffects)
+library(flextable)
+library(officer)
+library(censReg)
+library(ggpubr)
+library(AER)
+library(jtools)
+library(robust)
+library(ggrepel)
+
+`%notin%` <- Negate(`%in%`)
+
+
+set.seed(4798)
+dat <- read_excel("Agriculture and Forestry Grades by Instructor and Course - Summer 2017 thru Spring 2020.xls") %>%
+    rename(grade = `Grade Awarded`) %>%
+    filter(grade != 'AU') %>%
+    mutate(termC = as.character(Term)) %>%
+    filter(str_detect(termC, "3$")) %>%
+    mutate(Instructor = forcats::as_factor(Instructor), 
+           Course = forcats::as_factor(Course),
+           Term = forcats::as_factor(termC),
+           Grade = factor(grade, levels = c("A", "B", "C", "D", "F", "W", "S", "IC"))) %>%
+    mutate(Dept = forcats::as_factor(str_extract(Course, '[:alpha:]{3,4}')),
+           Course_Number = forcats::as_factor(str_extract(Course, '[:digit:]{3}'))) %>%
+    mutate(Upper = forcats::as_factor(ifelse(as.numeric(as.character(Course_Number)) >= 300,1,0))) %>%
+    unite("ID", Dept:Course_Number, sep = "", remove = TRUE) %>%
+    mutate(ID = forcats::as_factor(ID)) %>%
+    dplyr::select(-c(termC,grade,Course))
+
+dat$Instructor <- dat$Instructor %>% fct_anon()
+
+dat$pfw <- fct_recode(dat$Grade, "PASS" = "A", "PASS" = "B", "PASS" = "C", "PASS" = "S", "FAIL" = "D", "FAIL" = "F")
+
+#dat <- dat %>%
+#  filter(ID != "FOR480")
+
+```
+
+# Introduction
+Distance education is not an entirely new phenomenon in higher education in the United States (Beaudoin 1990). As early as the NCES (1997) reported the first survey on online education that represented higher education institutions, many were already offering two-way online coursework, with 75 percent of the institutions planning to increase their utilization of computer-based online interaction. The paradigm shift that has occurred towards more internet-focused delivery is a more recent phase of development. The change to entirely online delivery common to the spring of 2020 was unprecedented. 
+
+The online learning paradigm offers students an on-demand, asynchronous learning environment, or a synchronous experience with lectures delivered online. Online learners tend to be older than traditional students as this mode of education allows them flexibility with other aspects of life (e.g., work, family, etc.; Roddy et al., 2017). Online education is viewed as being more constructivist in its approach, requiring students to take a more active role in their education and be cognizant of technological requirements and support (Oomen-Early and Murphy 2009). The nature of online education requires that students be invested in their education, mindful of time management, and accustomed to the online format/delivery of course materials. 
+
+Faculty, likewise, have to understand the technological framework and tools necessary to facilitate online course delivery. While faculty are increasingly aware of and moving towards online capabilities, there is some reluctance to do so, potentially due to a perceived loss of community and rapport, or “disconnect,” with students; issues with technology, concerns over maintaining academic integrity; and lack of engagement by students (Bower 2001; Otter et al. 2013; Roddy et al. 2017, Wingo et al. 2017). A highly significant factor is the perceived greater time commitment it takes to teach an online course versus a traditional course (Otter et al. 2013). These and many other concerns were classified by Wingo et al. (2017) in their study of more than 60 papers published regarding online courses in higher education. Their model, an updated Technology Acceptance Model they termed TAM2, provided a framework for classifying faculty perceptions into eight constructs: perceived ease of use, subjective norms, voluntariness, experience, image, job relevance, output quality, and result demonstrability. Key barriers identified included output quality regarding student learning success and result demonstrability on the part of faculty. Student success relied on the investment of adequate time and effort to meet course learning objectives. Whether or not tangible results and benefits were gained by faculty centered on perceived workload, incentives, professional development opportunities, and institutional recognition.
+
+Like many universities around the US, on Monday, March 16, 2020, Louisiana Tech University (LaTech) transitioned to exclusively online instruction due to the COVID-19 pandemic (“Update for Students | Louisiana Tech University” 2020). LaTech is unique in that this nearly perfectly corresponded to the beginning of an academic term. LaTech is a quarter schedule, semester hour, school, resulting in a compressed schedule. In 2020, the spring quarter classes started on Wednesday, March 10, with great uncertainty about the term (University Registrar 2020). So much uncertainty surrounded the quarter that the dean’s office required a syllabus statement, cautioning that the quarter could be very different due to COVID-19. The Respondus LockDown Browser and Respondus Monitor were made available on March 20 to allow faculty to adapt their in-person exams to an online form and maintain academic integrity (Center for Instructional Technology 2020).
+
+This study evaluated the impacts of an abrupt transition to online education via the quasi-experiment provided by the COVID-19 pandemic. Most courses of instruction were interrupted mid-term (i.e., at universities that utilize a semester schedule). LaTech transitioned online over the weekend that followed “syllabus day.” This provides an opportunity to examine the impacts of a sudden shift in the mode of instruction, without the prior weight of weeks of traditional course delivery, potentially confounding performance outcomes. The involuntary nature of the transition also means that only the most strongly opposed students opted-out of the online experience and essentially no faculty were able to opt-out leading to very little self-selection bias in the results.
+
+The authors met as the students were sent home and discussed strategies for adapting and expectations for the quarter. We expected that the grade distribution would be increasingly bi-modal, with students either excelling or failing under the circumstances. We presumed this outcome because many of the A students will be A students no matter the circumstances. Some students have the intellect, but lack the discipline to complete a course online. We expected those students to complete in person coursework with Bs and Cs and we were not certain that those students would complete the online quarter. To examine the effect, we used a Poisson model to estimate the percent of students completing, passing, and earning an A. We found no statistically significant relationship; however, we were able demonstrate the variety of outcomes experienced by students and professors to challenge the single narrative of universal difficulty.
+
+
+# Methods
+
+The authors requested grade information from the Registrar’s office. We were unable to acquire any demographic data to accompany the grades, nor were we successful in gaining permission to use our records from the Human Use Committee. While these circumstances can be considered limiting, they were the best made available.
+
+The Registrar’s office grade report contains information on instructor, course, term, and grade awarded for three spring terms (Calendar Years 2018, 2019, and 2020) of courses offered through the School of Agricultural Sciences and Forestry (SASF). Instructor data was de-identified by randomly generating a number to replace each instructor’s name. The same individual instructors typically teach most spring quarter courses. In this dataset, the same instructor taught a class all three years in 20 of 40 of the courses taught, nine of the 40 courses were not taught in all three years. Of the remaining courses, four taught the course in both 2019 and 2020. This results in a dataset with 2,204 observations of grade outcomes by student and course section. Each observation included the course, section, instructor, grade outcomes and quarter. No personally identifying information was available regarding the students and there is no link between an individual student’s performance in multiple classes. 
+
+Grades are the traditional “A-F” sequence with “W” for withdrawal. LaTech does not employ a plus/minus grading system. The University extended the “W” (Withdrawal) deadline for Spring 2020 from May 1, 2020, to May 15, 2020, and also provided an opportunity for students to choose “PASS/FAIL” grading not previously available at LaTech (a single “S” for “PASS” was present in the data for an internship in 2018, but this is exceptionally atypical). Students were able to elect “PASS/FAIL” for grades of A, B, or C after the term was complete (“Interim Emergency Policy for Academics Spring Quarter 2020, COVID-19” 2020). “IC” is the notation for “Incomplete,” indicating that students have until a date in the fall to complete the course. As expected, “IC” grades are only present in the Spring 2020 term. The percent of each grade awarded by term is seen in Figure 1 with Panel A showing letter grades and Panel B showing “Pass” or “Fail” and withdrawals in both panels. The panels confirm the instructors’ hypothesized result, where more students excelled or withdrew during the Spring 2020 term. 
+
+
+```{r figure1, figure1, fig.cap= "Grades Awarded During Spring Term from 2018 to 2020 at Louisiana Tech University School of Agricultural Sciences and Forestry (LaTech SASF)", echo=TRUE}
+percent_grade <- dat %>%
+    count(Term, Grade) %>%
+    group_by(Term) %>%
+    mutate(Percent = n / sum(n) * 100) %>%
+    ungroup()
+
+percent_pfw <- dat %>%
+    count(Term, pfw) %>%
+    group_by(Term) %>%
+    mutate(Percent = n / sum(n) * 100) %>%
+    ungroup() %>%
+    filter(pfw == "PASS" | pfw == "FAIL" | pfw == "W") 
+
+p <- percent_grade %>%
+  add_case(Term = "20193",Grade = "S",n= 0,Percent = 0)%>%
+  add_case(Term = "20183",Grade = "IC",n= 0,Percent = 0)%>%
+  add_case(Term = "20193",Grade = "IC",n= 0,Percent = 0)%>%
+    ggplot(aes(x = Grade, y = Percent, fill = Term)) +
+    geom_bar(stat = "identity", position = position_dodge(width = .9), width = .8)+
+  ggsci::scale_fill_npg(name = "Term", labels = c("2018", "2019", "2020")) +
+  geom_text(aes(label = round(Percent,1)), position = position_dodge(width = .9), vjust = 0.2, hjust = -0.1, size = 3,angle = 90) +
+  scale_y_continuous(expand = c(0.1, .1))
+
+
+pfwplot <- ggplot(percent_pfw, aes(x = pfw, y= Percent, fill = Term)) + 
+  geom_bar(stat = "identity", position = position_dodge(width = .9), width = .8) + 
+  scale_x_discrete(labels=c("PASS" = "PASS \n(A, B, OR C)", "FAIL" = "FAIL \n(D OR F)", "W" = "W"))+
+  ggsci::scale_fill_npg(name = "Term", labels = c("2018", "2019", "2020")) +
+  geom_text(aes(label = round(Percent,1)), position = position_dodge(width = .9), vjust = 0.2, hjust = -0.1, size = 3,angle = 90) +
+  scale_y_continuous(expand = c(0.1, .1))+
+  xlab("Outcome")
+
+ggarrange(p,pfwplot,widths = c(2, 1),align = 'h',  common.legend = TRUE, labels = "AUTO")  %>%
+  ggexport(filename = "~/results/lettersandpassfail.png",
+  width = 640,
+  height = 480)    
+
+
+
+```
+
+Completing a course is considered earning any grade other than “W” or “IC.” Passing a class is counted as earning an “A,” “B,” “C,” or “S.” Some curriculum in the school allow “D” grades to be counted toward graduation; however, this is not the case for all of the degree programs. Therefore, grades of “D” and “F” are regarded as failing. The percent that passed a course, and the percent that completed a course were both calculated. 
+
+Special problems and internship courses were excluded because students often earn A’s in those classes (96 of the 2,204 observations were dropped).  The registar data was further processed such that each course, instructor, and term combination was represented as an observation with percent completing, percent passing, and percent earning A, as well as binary variables for instructor, course, term, and upper level. A binary variable for the “other” courses was not included in the following regressions. The resulting dataset used for estimation had 87 observations. 
+	
+Percent completing, percent passing, and percent earning an A in the course were modeled as a function of course, term, and a random disturbance (ε). Courses are identified as a series of binary variables, and the 2020 term is identified as a binary variable. Courses are further specified as upper level by a binary variable. Two instructors taught one course in the same term, so a binary explanatory variable was included to control for one of the instructors (Instructor 12) in this course. Thirty-five explanatory variables leave only 51 degrees of freedom.
+
+$$
+Grade(Complete \ or \ Pass \ or \ A)=f(Course,Term,\varepsilon)	
+$$
+
+These three models are modeled as a Poisson process. A Poisson model is used to model count and rate data. Percent completing, percent passing and percent earning an A, rounded to the whole number, are appropriately modeled as a Poisson model. The model estimating percent earning an A failed a test of over-dispersion and was estimated using a quasiPoisson estimator. Zou (2004) indicates that a robust standard error estimation procedure is needed when all independent variables are binary. Greene (2012) states that using a robust standard error can accommodate certain misspecifications of the Poisson model and small sample bias was a concern, so the MacKinnon and White (1985) standard error estimator (HC1) was employed to address these concerns. 
+
+```{r poissonmodel, echo=TRUE}
+d2 <- dat %>%
+    filter(ID != 'OTHER')%>%
+    fastDummies::dummy_cols() %>%
+    group_by(ID,Instructor,Term)%>%
+    summarise(PASSING = sum(Grade_A,Grade_B,Grade_C,Grade_S),
+              FAILING = sum(Grade_D,Grade_F),
+              FINISHING = sum(pfw_PASS,pfw_FAIL),
+              NOTFINISHING = sum(pfw_W,pfw_IC),
+              n = n(),
+              EarnA = sum(Grade_A))
+d3 <- d2 %>%
+  mutate(PCT_PASS = round(PASSING/(PASSING+FAILING)*100),
+              PCT_FINISH = round(FINISHING/(FINISHING+NOTFINISHING)*100),
+              PCT_A = round(EarnA/(PASSING+FAILING)*100)
+              )
+
+d3u <- ifelse(as.numeric(stringr::str_extract(d3$ID,'[:digit:]{3}$'))>299,1,0)
+d3u <- replace_na(d3u,1)
+
+#"OTHER" = "AGBU425","OTHER" = "AGSC478","OTHER" = "AGSC516","OTHER" = "ANSC225", "OTHER" = "ANSC425","OTHER" = "FOR420", "OTHER" = "FOR478"
+
+d3_dum <- d3 %>%
+  add_column(UPPER = d3u)%>%
+    fastDummies::dummy_cols() %>%
+    mutate(
+Term_20183     = forcats::as_factor(Term_20183),
+Term_20193     = forcats::as_factor(Term_20193),
+Term_20203     = forcats::as_factor(Term_20203),
+UPPER     = forcats::as_factor(UPPER),
+Instructor_11  = forcats::as_factor(Instructor_11),  
+Instructor_12  = forcats::as_factor(Instructor_12),  
+ID_AGBU310  = forcats::as_factor(ID_AGBU310),  
+ID_AGBU402  = forcats::as_factor(ID_AGBU402),  
+ID_AGSC211  = forcats::as_factor(ID_AGSC211),   
+ID_AGSC320  = forcats::as_factor(ID_AGSC320), 
+ID_AGSC411  = forcats::as_factor(ID_AGSC411),  
+ID_ANSC223  = forcats::as_factor(ID_ANSC223),   
+ID_ANSC224  = forcats::as_factor(ID_ANSC224), 
+ID_ANSC230  = forcats::as_factor(ID_ANSC230),  
+ID_ANSC301  = forcats::as_factor(ID_ANSC301),  
+ID_ANSC315  = forcats::as_factor(ID_ANSC315),   
+ID_ANSC340  = forcats::as_factor(ID_ANSC340), 
+ID_ANSC409  = forcats::as_factor(ID_ANSC409),  
+ID_ANSC411  = forcats::as_factor(ID_ANSC411),  
+ID_FOR111   = forcats::as_factor(ID_FOR111),
+ID_FOR200   = forcats::as_factor(ID_FOR200),
+ID_FOR230   = forcats::as_factor(ID_FOR230), 
+ID_FOR233   = forcats::as_factor(ID_FOR233), 
+ID_FOR302   = forcats::as_factor(ID_FOR302), 
+ID_FOR313   = forcats::as_factor(ID_FOR313),
+ID_FOR402   = forcats::as_factor(ID_FOR402),
+ID_FOR404   = forcats::as_factor(ID_FOR404), 
+ID_FOR480   = forcats::as_factor(ID_FOR480),
+ID_GISC250  = forcats::as_factor(ID_GISC250), 
+ID_GISC260  = forcats::as_factor(ID_GISC260),  
+ID_PLSC101  = forcats::as_factor(ID_PLSC101),  
+ID_PLSC211  = forcats::as_factor(ID_PLSC211),  
+ID_PLSC284  = forcats::as_factor(ID_PLSC284),   
+ID_PLSC310  = forcats::as_factor(ID_PLSC310), 
+ID_PLSC311  = forcats::as_factor(ID_PLSC311),  
+ID_PLSC312  = forcats::as_factor(ID_PLSC312),  
+ID_PLSC400  = forcats::as_factor(ID_PLSC400),  
+ID_WILD314  = forcats::as_factor(ID_WILD314),   
+ID_WILD347  = forcats::as_factor(ID_WILD347)
+    ) 
+
+finish_formula <-  PCT_FINISH  ~ Term_20203 + Term_20193 + UPPER + 
+  ID_AGBU310  + 
+  ID_AGSC211 + ID_AGSC320 + ID_AGSC411 + 
+  ID_ANSC230 + ID_ANSC223 + ID_ANSC224 + ID_ANSC301 + ID_ANSC315  + ID_ANSC409 + ID_ANSC411 + 
+  ID_FOR111  + ID_FOR230 + ID_FOR233 + ID_FOR302 + ID_FOR313 + ID_FOR402 + ID_FOR404 + ID_FOR480 + 
+   
+  ID_PLSC101  + ID_PLSC310 + ID_PLSC311 + ID_PLSC312 + ID_PLSC400 + 
+  ID_WILD314 +
+  Instructor_12 + ID_AGBU402+ ID_FOR200 +ID_GISC250 + ID_GISC260 + ID_ANSC340 + ID_PLSC211
+
+pass_formula <-  PCT_PASS  ~ Term_20203 + Term_20193 + UPPER +
+    ID_AGBU310 + ID_AGBU402 + 
+  ID_AGSC211 + ID_AGSC320 + ID_AGSC411 + 
+  ID_ANSC230 + ID_ANSC223 + ID_ANSC224 + ID_ANSC301 + ID_ANSC315 + ID_ANSC340 + ID_ANSC409 + ID_ANSC411 + 
+  ID_FOR111 + ID_FOR200  + ID_FOR233 + ID_FOR302  + ID_FOR402 + ID_FOR404 + ID_FOR480 + 
+   ID_GISC260 + 
+   ID_PLSC211  + ID_PLSC310 + ID_PLSC311 + ID_PLSC312 + ID_PLSC400 + 
+  ID_WILD314 + ID_GISC250 + + ID_FOR313 + ID_FOR230 +ID_PLSC101 +
+  Instructor_12
+
+A_formula <-  PCT_A  ~ Term_20203 + Term_20193 + UPPER +
+  ID_AGBU310 + ID_AGBU402 + 
+  ID_AGSC211 + ID_AGSC320 + ID_AGSC411 + 
+  ID_ANSC230 + ID_ANSC223 + ID_ANSC224 + ID_ANSC301 + ID_ANSC315 + ID_ANSC340 + ID_ANSC409 + ID_ANSC411 + 
+  ID_FOR111 + ID_FOR200 + ID_FOR230 + ID_FOR233 + ID_FOR302 + ID_FOR313 + ID_FOR402 + ID_FOR404 + ID_FOR480 + 
+  ID_GISC250 + ID_GISC260 + 
+  ID_PLSC101 + ID_PLSC211  + ID_PLSC310 + ID_PLSC311 + ID_PLSC312 + ID_PLSC400 + 
+  ID_WILD314 +
+  Instructor_12
+
+finish_poisson <- glm(finish_formula, family = poisson(link = "identity"), data = d3_dum)
+#summary(finish_poisson)
+fp <- coeftest(finish_poisson, vcov = vcovHC(finish_poisson, type="HC1"))
+#fp
+
+pass_poisson <- glm(pass_formula, family = poisson(link = "identity"), data = d3_dum )
+#summary(pass_poisson)
+pp <- coeftest(pass_poisson, vcov = vcovHC(pass_poisson, type="HC1"))
+#pp
+
+a_poisson <- glm(A_formula, family = quasipoisson, data = d3_dum)
+#summary(a_poisson)
+pa <- coeftest(a_poisson, vcov = vcovHC(a_poisson, type="HC1"))
+#pa
+
+```
+
+# Results
+
+```{r marginalfigure, echo=TRUE}
+#Fig 2 Panel A
+ggFinish <- ggpredict(finish_poisson,  "Term_20203")
+predict_Finish <- plot(ggFinish, add.data = TRUE) + 
+    xlab('Spring 2020 Binary') +
+    ylab('Predicted Percent \nFinishing') +
+    ggtitle('')+ 
+  cowplot::theme_minimal_hgrid(11)
+predict_Finish
+#Fig 2 Panel B
+ggPass <- ggpredict(pass_poisson, terms = "Term_20203")
+predict_Pass <- plot(ggPass, add.data = TRUE) + 
+    xlab('Spring 2020 Binary') +
+    ylab('Predicted Percent \nPassing') +
+    ggtitle('')+ 
+  cowplot::theme_minimal_hgrid(11)
+predict_Pass
+#Fig 2 Panel C
+ggA <- ggpredict(a_poisson, terms = "Term_20203")
+predict_A <- plot(ggA,add.data = TRUE) + 
+  xlab('Spring 2020 Binary') +
+    ylab('Predicted Percent \nEarning A') +
+    ggtitle('')+ 
+  cowplot::theme_minimal_hgrid(11)
+predict_A
+
+#Fig 2 Combined
+predict <- cowplot::plot_grid(predict_Finish,predict_Pass,predict_A,
+                    labels = c("A. Predicted Percent Finishing",
+                               "B. Predicted Percent Passing",
+                               "C. Predicted Percent Earning an A"), 
+                    label_size = 10, hjust = 0, ncol = 1)
+predict
+save_plot('~/results/predict.png',plot= predict, base_height = 7, base_width = 3.375)
+
+#Fig 3 Panel A 
+hist_FINISH_v <- ggplot(d3_dum, aes(x=Term, y=PCT_FINISH)) + 
+  geom_violin()+
+  geom_boxplot(width=0.1)+
+      xlab('Term') +
+    ylab('Historic Percent \nFinishing') +
+  scale_y_continuous(expand = c(0.1, .1))+
+  scale_x_discrete(labels=c("20183" = "SP18", "20193" = "SP19", "20203" = "SP20"))+ 
+  cowplot::theme_minimal_hgrid(11)
+plotly::ggplotly(hist_FINISH_v)
+#Fig 3 Panel B
+hist_PASS_v <- ggplot(d3_dum, aes(x=Term, y=PCT_PASS)) + 
+  geom_violin()+
+  geom_boxplot(width=0.1)+
+      xlab('Term') +
+    ylab('Historic Percent \nPassing') +
+  scale_x_discrete(labels=c("20183" = "SP18", "20193" = "SP19","20203" = "SP20"))+ 
+  scale_y_continuous(expand = c(0.1, .1))+
+  cowplot::theme_minimal_hgrid(11)
+plotly::ggplotly(hist_PASS_v)
+#Fig 3 Panel C
+hist_A_v <- ggplot(d3_dum, aes(x=Term, y=PCT_A)) + 
+  geom_violin()+
+  geom_boxplot(width=0.1)+
+      xlab('Term') +
+    ylab('Historic Percent \nEarning A') +
+  scale_x_discrete(labels=c("20183" = "SP18", "20193" = "SP19", "20203" = "SP20"))+ 
+  scale_y_continuous(expand = c(0.1, .1))+
+  cowplot::theme_minimal_hgrid(11)
+plotly::ggplotly(hist_A_v)
+
+#Fig 3 Combined
+violin <- cowplot::plot_grid(hist_FINISH_v,hist_PASS_v,hist_A_v,
+                    labels = c("A. Historic Distribution of Percent Finishing",
+                               "B. Historic Distribution of Percent Passing",
+                               "C. Historic Distribution of Percent Earning an A"), 
+                    label_size = 10, hjust = 0,  ncol = 1)
+violin
+save_plot('~/results/violin.png',plot= violin, base_height = 7, base_width = 3.375)
+
+#Fig 4 Panel A
+hist_FINISH <-  d3_dum %>%
+  filter(ID %notin% c('ANSC223','ANSC230','ANSC301','ANSC315','PLSC312','WILD314')) %>%
+  ggplot(aes(x = Term, y = PCT_FINISH,   group =   interaction(UPPER,ID)))+
+  geom_point() + 
+  geom_smooth(method = 'lm',se=FALSE, size=1)+
+  stat_regline_equation(label.y=25, size = 2.5)+
+  facet_wrap('ID',nrow = 4)+
+    xlab('Term') +
+    ylab('Historic Percent \nFinishing') +
+    ggtitle('')+
+  theme(legend.position="none")+
+  scale_x_discrete(labels=c("20183" = "SP18", "20193" = "SP19", "20203" = "SP20"))+
+  scale_y_continuous(breaks=c(33,66,100), limits=c(0, NA))+
+  cowplot::theme_minimal_hgrid(11)
+plotly::ggplotly(hist_FINISH)
+#Fig 4 Panel B
+hist_PASS <-  d3_dum %>%
+  filter(ID %notin% c('ANSC223','ANSC230','ANSC301','ANSC315','PLSC312','WILD314')) %>%
+  ggplot(aes(x = Term, y = PCT_PASS,   group =   interaction(UPPER,ID)))+
+  geom_point() + 
+  geom_smooth(method = 'lm',se=FALSE, size=1)+
+  stat_regline_equation(label.y=25, size = 2.5)+
+  facet_wrap('ID',nrow = 4)+
+    xlab('Term') +
+    ylab('Historic Percent \nPassing') +
+  scale_y_continuous(breaks=c(33,66,100), limits=c(0, NA))+
+    ggtitle('')+ 
+  theme(legend.position="none")+
+  scale_x_discrete(labels=c("20183" = "SP18", "20193" = "SP19",  "20203" = "SP20"))+ 
+  cowplot::theme_minimal_hgrid(11)
+plotly::ggplotly(hist_PASS)
+#Fig 4 Panel C
+hist_A_indiv <-  d3_dum %>%
+  filter(ID %notin% c('ANSC223','ANSC230','ANSC301','ANSC315','PLSC312','WILD314')) %>%
+  ggplot(aes(x = Term, y = PCT_A, group =   interaction(UPPER,ID)))+
+  geom_smooth(method = 'lm',se=FALSE, size=1)+
+  stat_regline_equation(label.y=25, size = 2.5)+
+  facet_wrap('ID',nrow = 4)+
+    xlab('Term') +
+    ylab('Historic Percent \nEarning A') +
+    ggtitle('') +
+  theme(legend.position="none")+
+  scale_y_continuous(breaks=c(33,66,100), limits=c(0, NA))+
+  geom_point() +
+  scale_x_discrete(labels=c("20183" = "SP18", "20193" = "SP19", "20203" = "SP20"))+ 
+  cowplot::theme_minimal_hgrid(11)
+plotly::ggplotly(hist_A_indiv)
+
+#Fig 4 Combined
+hist <- cowplot::plot_grid(hist_FINISH,hist_PASS,hist_A_indiv,
+                    labels = c("A. Slope of Historic Percent Finishing",
+                               "B. Slope of Historic Percent Passing",
+                               "C. Slope of Historic Percent Earning an A"), 
+                    label_size = 10, hjust = -0.2, ncol = 1)
+hist
+#save_plot('hist.png',plot= hist, base_height = 10, base_width = 8.75)
+
+# Figs 2-4 Combined
+histAndResult <- plot_grid(predict,violin,hist,nrow = 1, rel_widths = c(.3,.3,1))
+histAndResult
+save_plot('~/results/histAndResult.png',plot= histAndResult, base_height = 13, base_width = 18)
+```
+
+The summary results of the three Poisson regressions are shown in Table A2. None of the Spring 2020 quarter variables were statistically significant. With 36 independent variables, all of which are binary, most values are zeros. With only 87 observations this finding is not entirely surprising. The link between larger samples and significance is well known. Marginal effects plots show interesting interactions though. This table of results uses MacKinnon and White (1985)’s standard error estimator to correct for a small sample bias and the Spring 2020 term variable was not significant in any of the esitmated regressions. If one disregards the need for a small sample correction (difficult to justify with only 87 observations) and uses White’s standard errors (White 1980) the Spring 2020 variable was significant in the percent completing model; however, this should be interpreted with caution. The plots in Figure 2, 3, and 4 provide more insight than a simple test for significance. 
+
+Figure 2 contains the marginal effects, Figure 3 the historic distributions, and Figure 4 the percent completing, passing, and earning an A each term by class plotted to show the changes over time. The top row is percent completing, the second is percent passing, and the third row is percent earning an A. Taken together it becomes clearer why the models were not able to produce more significant results. There is not a single common experience across courses. 
+The size of the marginal effect of the spring term variable in the Poisson regressions is shown in Figure 2. Poisson marginal effects are calculated via simulation by predicting each observation and comparing the predictions (the black dot on the bar represents the median and the bar the confidence interval, while the red dots are observed values) with the documented outcomes.  Figure 3 shows the historic distribution of each measure in the three periods. Figure 4 plots each of the measures over the three periods by course and plot a least squares fit over the two to three terms observed.
+
+All three marginal effects plots  (Figure 2) show clusters at the 100 percent mark in Spring 2020 as well as in previous periods indicating that several courses exist where essentially all of the students complete and pass, and to a lesser degree, earn As. The marginal effects plots show the strength of that statement by the amount of the predicted space above 100 percent in percent completing and passing. Less of the predicted space was outside the possible space in 2020 indicating that this effect was less prevalent in that period. The predicted plots do indicate a small decrease in students completing and passing and a small increase in students earning A’s in the Spring 2020 term. 
+
+The historical distributions in Figure 3 show that the mean of students completing was very close to 100 percent for all three terms. However, the primary result of interest in Panel A is how the whisker between the minimum value and first quartile  is much shorter than previous terms and the increase in lower bound outliers in Spring 2020 indicating that in most classes a consistent number of students continued to complete in the Spring 2020 term, but some classes saw many more than usual students withdraw from the course. The four courses that had more trouble retaining students than usual are quantitative and computer intensive courses (AGBU 402, GISC 250, GISC260, and FOR 200). Many of our students struggle with both of those types of courses. Two of those courses also had fewer students pass in the spring of 2020. The distribution of percent passing is very similar across terms, with the exception of the previously mentioned courses as outliers. The mean of students earning A’s was slightly higher, the inner quartile range was slightly smaller with longer whiskers, and there were no outliers in this distribution. Excluding outliers did not change the statistical significance of the Spring 2020 term for the percent passing estimation. 
+
+Figure 4 shows the same information broken down by course with a least squares fitted trendline plotted to show the direction of change over terms. A least squares trendline has the advantage of putting the Spring 2020 term in perspective, but not overreacting to a one term change. For example, PLSC 211 in Panel A would look much worse if completion in Spring 2018, when completions were nearly the same as Spring 2020, were not taken into account.  Along with the plot of the least squares line, the equation for the line is printed on each plot as well. A slope with an absolute value of less than one can be found in 11 courses in the percent completing plot, ten courses in the percent passing plot, and one in the percent earning an A plot. An absolute value of slope of less than one likely indicates little impact across terms. Seven had positive slopes indicating that more students completeed, ten had positive slopes indicating more students passing, and thirteen had positive slopes indicating that more students earned A’s than usual. Nine courses had negative slopes indicating fewer students completeed the course, six courses had negative slopes indicating fewer students passing, and twelve courses had negative slopes indicating fewer A’s than usual.
+
+# Discussion
+
+Taken as a whole, these results show that there was not a single monolithic experience in the Spring 2020 term. Possible explanations for those differences can be divided between those relating to the student, the professor, and the content. The remaining paragraphs will parse out the experience according to those themes. The application of the explanations are anecdotal, but with the quantitative results in Figure 2, 3, and 4, they add context to the plots.
+
+Many of our students work throughout the school year and we (the authors) were concerned that without the structure of attending class students would work more hours. In many cases this turned out to be true, including one of the Ws in AGBU 230 who worked to support his family after both of his parents lost their jobs. Some students found themselves with fewer distractions as their social life was locked down. One such student in AGBU 402 noted how much more he was enjoying class because he was trying (it was his second attempt). 
+
+The literature indicated there would be more success among better prepared students as they would be better able to adapt to the online delivery. The students remaining perhaps had more prior knowledge in the subjects and were more motivated to overcome technological issues (Roddy et al. 2017). Online education can indeed be as effective as traditional in-person education, provided thought is given to the delivery of materials and interaction with students by instructors (Tucker 2001; Frederickson et al. 2005; Roddy et al. 2017). Students’ ability to adapt to rapidly changing situations is an essential skill in their development and integration into the workforce.
+
+The final student related possible explanation centers around the potential for academic dishonesty to increase in the online environment. In at least one course (to the authors’ knowledge) there were three (14 percent of the initial enrollment for the course) Fs for academic dishonesty on homework, when there is normally about one student per term on average.  
+
+Four courses were outliers in the Spring 2020 completion distribution that had not been outliers before (Figure 3, Panel A). In addition to becoming outliers, the percent completing these courses was much lower than the outliers of previous terms. Course content was noted as a possible cause. AGBU 402 is a farm enterprise analysis course that heavily employs Microsoft Excel. FOR 200 is a forest measurements course that is a first introduction to statistics and regression. GISC 250 is a course on GIS, and GISC 260 is an introductory remote sensing course. Many students prefer to take these courses in person and many simply decided to wait and withdrew. 
+
+The professor must thoughtfully adapt their course to online delivery to ensure success and some were not up to the task. One such explanation is the different approaches to moving a class online. The sudden switch from in-person to online delivery caught students and professors (generally) unaware. Without time to fully prepare, faculty either maintained a synchronous online lecture or developed asynchronous delivery by using lecture capture technologies (e.g., Zoom, Google Meet, etc.). Anecdotally, some instructors were unable to imagine their courses presented remotely and simply awarded grades or compensated for their lack of confidence in their remote teaching abilities by awarding grades generously. This narrative matches the data for course where the professor (not one of the authors) admitted to “just giving everyone an A.” 
+
+An example where course adaptation might have muted impacts of the transition to online learning was AGSC 320. AGSC 320 is a statistical methods course that emphasizes applications in the context of agriculture and natural resources. Students’ levels range from sophomore to senior. The class was limited to 30 students in each term. In Spring 2020, AGSC was taught synchronously via Google Meet. The synchronous classroom was employed with the goal of keeping everyone- including the professor- disciplined and on task. Students were required to attend class at the normally scheduled times of 2:00 to 3:50 pm on Wednesday and Friday. Each lecture was recorded and uploaded to a shared class folder. Screens were shared, and examples were worked on a whiteboard. Multiple students commented on the sense of “normalcy” the synchronous environment provided. No student withdrew, one intended to opt for “Pass” rather than the letter grade earned (though this cannot be confirmed), and only one student failed to earn at least a C grade. In 2018 and 2019, approximately ten percent of students withdrew, and another ten percent failed to earn a C or better.
+
+The results show that there is much that we do not know. However, the fact that there is not a single narrative is abundantly clear. Each student, content, and professor was impacted by the sudden shift online differently. With more observations, both leading up to the Spring 2020 term and across different colleges within the University, the outcomes could be sorted into types before implementing a regression similar to the three used in this study.
+
+Future research needs to address student demographic variables and the student’s academic history to understand how the transition online affected individual students and their academic achievement. At LaTech, this type of research will require a signed statement allowing the student to opt-in to the research project. For students that have stopped or dropped out, this may be impossible to acquire as those students are not likely to respond to inquiries. Other institutions may be able to use student records to examine these phenomena further to understand what causes these results.
+
+It is vital as the pandemic continues is adequate instruction in online courses and access to training for faculty to integrate online instruction (Roddy et al. 2017) and student access to technology that better allows them to engage in their education. As the pandemic continues, online educational delivery will likely become more of a norm rather than an exception. It will be necessary for educators and administrators to understand what pushes students to withdraw and to attempt to continue to engage students. 
+
+# Appendix
+
+```{r tabsum, echo=TRUE}
+options(knitr.kable.NA = '')
+
+dat$Grade <- dat %>%
+  pull(Grade) %>%
+  fct_relevel("A","B","C","S","D","F","W","IC")
+
+dat$ID <- dat %>% 
+  pull(ID) %>%
+  fct_relevel(
+        levels = c("AGBU310", "AGBU402", "AGBU425", 
+                "AGSC211", "AGSC320", "AGSC411", "AGSC478", "AGSC516", 
+                "ANSC230", "ANSC223","ANSC224", "ANSC225", "ANSC301", "ANSC315", "ANSC340", "ANSC409", "ANSC411", "ANSC425",   
+                "FOR111", "FOR200", "FOR230", "FOR233", "FOR302", "FOR313", "FOR402", "FOR404", "FOR420", "FOR478", "FOR480",
+                "GISC250", "GISC260",
+                "PLSC101", "PLSC211", "PLSC284", "PLSC310", "PLSC311", "PLSC312","PLSC400",
+                "WILD314", "WILD347")) 
+  
+dat$ID <- dat %>% 
+  pull(ID) %>%
+  fct_recode("OTHER" = "AGBU425","OTHER" = "AGSC478","OTHER" = "AGSC516","OTHER" = "ANSC225", "OTHER" = "ANSC425","OTHER" = "FOR420", "OTHER" = "FOR478")
+
+dat$Instructor <- ifelse(dat$ID == "OTHER","OTHER",dat$Instructor)
+  
+
+ggdensity(dat,x = "Grade",color = 'ID') +
+  facet_grid(~Term)+
+  ggtitle("Pretty, but meaningless.")
+
+
+ggplot(dat, aes(x = Grade,fill = Term))+
+  geom_histogram(stat = 'count',position = 'dodge')  +
+  facet_grid(ID~., switch = "y")+
+  theme(strip.text.y.left = element_text(angle = 0))
+
+
+dat %>%
+  group_by(ID, Instructor, Term) %>%
+  summarize(N=n()) %>%
+  arrange(ID,Term) %>%
+  flextable() %>%
+  theme_vanilla()
+
+```
+
+
+```{r poissonmodelresults, echo=TRUE, warning=FALSE, results='asis'}
+stargazer(pp,fp,pa, title = "", align = TRUE, out = 'result.html', no.space=TRUE, single.row=TRUE,
+column.labels=c("Percent Passing","Percent Finishing","Percent Earning A"), model.numbers=FALSE)
+ 
+```
+
+# References
+
+Beaudoin, M. 1990. “The Instructor’s Changing Role in Distance Education.” The American Journal of Distance Education 4(2): 21-29. 
+Bower, B.L. 2001. “Distance Education: Facing the Faculty Challenge.” Online Journal of Distance Learning Administration 4(2). Available from: https://www.westga.edu/~distance/ojdla/summer42/bower42.html. Last accessed: 14 August 2020.
+Center for Instructional Technology. ‘[Facstaff-l] Instructional Technology Update - 3/20/20’.
+Dixson, M.D. 2010. “Creating Effective Student Engagement in Online Courses: What do Students Find Engaging.” Journal of the Scholarship of Teaching and Learning 10(2): 1-13. Available from: https://files.eric.ed.gov/fulltext/EJ890707.pdf. Last accessed 14 August 2020.
+Frederickson, N., P. Reed, and V. Clifford. 2005. “Evaluating Web-supported Learning Versus Lecture-based Teaching: Quantitative and Qualitative Perspectives.” Higher Education 50: 645-664.
+“Interim Emergency Policy for Academics Spring Quarter 2020, COVID-19.” 2020. https://www.latech.edu/documents/2020/03/2020-interim-emergency-policy.pdf/#:~:text=Withdrawal Date,%2C to May 15%2C 2020.
+Oomen-Early, J. and L. Murphy. 2009. “Self-actualization and E-learning: A Qualitative Investigation of University Faculty’s Perceived Needs for Effective Online Instruction.” International Journal on E-Learning 8(2): 223-240. 
+Otter, R.R., S. Seipel, T. Graeff, B. Alexander, C. Boraiko J. Gray, K. Petersen, and K. Sadler. 2013. Comparing student and faculty perceptions of online and traditional courses. Internet and Higher Education 19(2013):27-35.
+Roddy, C., D.L. Amiet, J. Chung, C. Holt, L. Shaw, S. McKenzie, F. Garivaldis, J.M. Lodge, and M.E. Mundy. 2017. “Applying Best Practice Online Learning, Teaching and Support to Intensive Online Environments: An Integrative Review.” Frontiers in Education 2:59. doi: 10.3389/feduc.2017.00059. 
+Tucker, S. 2001. “Distance Education: Better, Worse, or as Good as Traditional Education?” Online Journal of Distance Learning Administration 4(4). Available from: http://www.westga.edu/~distance/ojdla/winter44/tucker44.html. Last accessed 14 August 2020.
+University Registrar. 2020. “Spring Quarter 2020.” https://boss.latech.edu/.
+“Update for Students | Louisiana Tech University.” 2020. https://www.latech.edu/coronavirus/messages/update-for-students/.
+U.S. Department of Agriculture. 2020. Table 77. Summary of operating arrangements. Census of Agriculture, 2017, Volume 1 Chapter 1, State Level Data: Louisiana. Available at https://www.nass.usda.gov/Publications/AgCensus/2017/Full_Report/Volume_1,_Chapter_1_State_Level/Louisiana/. Last accessed August 15, 2020.
+U.S. Department of Education, National Center for Education Statistics. 1997. “Distance Education in Higher Education Institutions.” NCES 98-062. By Laurie Lewis, Debbie Alexander, and Elizabeth Farris. Bernie Greene, project officer. Washington, DC. https://nces.ed.gov/pubs98/98062.pdf.
+Wingo, N.P., N.V. Ivankova, J.A. Moss. 2017. Faculty perceptions about teaching online: exploring the literature using the technology acceptance model as an organizing framework, Online Learning 21(1), 15-35.
+Zhu, Y. J.H. Zhang, W. Au, and G. Yates. 2020. “University Students’ Online Learning Attitudes and Continuous Intention to Undertake Online Courses: A Self-regulated Learning Perspective.” Educational Technology Research and Development 68: 1485-1519. 
+Zou, Guangyong. 2004. “A Modified Poisson Regression Approach to Prospective Studies with Binary Data.” American Journal of Epidemiology 159 (7): 702–6. https://doi.org/10.1093/aje/kwh090.
