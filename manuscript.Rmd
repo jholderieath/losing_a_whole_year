@@ -32,7 +32,7 @@ library(ggpubr)
 
 
 set.seed(4798)
-data <- read_excel("Grades by Instructor and Course - Spring 2018 thru Winter 2021.xls")%>%
+data <- read_excel("Grades by Instructor and Course - Spring 2018 thru Winter 2021.xlsx")%>%
     rename(grade = `Grade Awarded`) %>%
     filter(grade != 'AU') %>%
     mutate(termC = as.character(Term)) %>%
