@@ -1,14 +1,8 @@
 ---
-title: 'Losing a Whole Year:<br> ISFRE Update'
+title: 'Losing a Whole Year:<br> '
 author: "Jason Holderieath, Michael Crosby, T. Eric McConnell, D. Paul Jackson"
 date: "5/19/2021"
-output: 
-  ioslides_presentation:
-    logo: images/logo.png
-    widescreen: true
-    fig_width: 8
-    fig_height: 4
-    fig_caption: true
+
 ---
 
 ```{r setup, include=FALSE}
@@ -130,12 +124,14 @@ plotly::ggplotly(p)
 ```
 
 ```{r}
-data %>%
+plot <- data %>%
   group_by(term_label) %>%
   summarize(n = n()) %>%
   ggplot(aes(x = term_label, y = n, fill = term_label)) +
     geom_bar(stat = "identity", position = position_dodge(width = .9), width = .8)+
   scale_fill_manual("Term",values=c("blue4","darkorange4","green4","gray4","blue3","darkorange3","green3","gray3","blue2","darkorange2","green2","gray2","blue1","darkorange1","green1","gray1"))
+plotly::ggplotly(plot)
+
 ```
 
 ## University Data | SP20 Median Almost 60% A's
@@ -189,8 +185,9 @@ summary(data) %>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 d2 <- data %>%
     filter(ID != 'OTHER')%>%
-    fastDummies::dummy_cols() %>%
-    group_by(ID,Instructor,FULL_ID,term_label,Online,Honors)%>%
+    select(-Section,-Term) %>%
+    fastDummies::dummy_cols(select_columns = c('Grade','pfw'), remove_selected_columns = FALSE) %>%
+    group_by(ID,FULL_ID,term_label,Instructor,quarter,Dept,Honors,Online)%>%
     summarise(PASSING = sum(Grade_A,Grade_B,Grade_C,Grade_S),
               FAILING = sum(Grade_D,Grade_F),
               FINISHING = sum(pfw_PASS,pfw_FAIL),
